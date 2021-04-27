@@ -13,17 +13,31 @@ import android.widget.Toast;
 import com.google.gson.Gson;
 import com.squareup.picasso.Picasso;
 
+import org.simpleframework.xml.convert.Convert;
+
+import java.io.BufferedOutputStream;
+import java.io.File;
+import java.io.FileOutputStream;
+import java.io.FileReader;
+import java.io.FileWriter;
 import java.io.IOException;
+import java.io.InputStream;
+import java.io.OutputStream;
+import java.io.OutputStreamWriter;
 import java.util.ArrayList;
 
 import okhttp3.HttpUrl;
 import okhttp3.OkHttpClient;
 import okhttp3.Request;
 import okhttp3.Response;
+import okhttp3.ResponseBody;
 import retrofit2.Call;
+import retrofit2.Callback;
+import retrofit2.Converter;
 import retrofit2.Retrofit;
 import retrofit2.converter.gson.GsonConverterFactory;
 import retrofit2.converter.scalars.ScalarsConverterFactory;
+import retrofit2.converter.simplexml.SimpleXmlConverterFactory;
 
 public class MainActivity extends AppCompatActivity {
 
@@ -32,6 +46,7 @@ public class MainActivity extends AppCompatActivity {
     Button speechButton;
     SpaceResponse spaceResponse;
     String token = "";
+    String text;
 
     private final String ADDRESS = "https://api.nasa.gov/planetary/apod?api_key=DEMO_KEY";
 
@@ -50,7 +65,7 @@ public class MainActivity extends AppCompatActivity {
     }
 
     public void getVoices(View view) {
-        String text = infoText.getText().toString();
+        text = infoText.getText().toString();
         Retrofit tokenRetrofit = new Retrofit.Builder()
                 .baseUrl(AzureTokenAPI.tokenURI)
                 .addConverterFactory(ScalarsConverterFactory.create())
@@ -139,50 +154,85 @@ public class MainActivity extends AppCompatActivity {
         @Override
         public void onResponse(Call<String> call, retrofit2.Response<String> response) {
             if(response.isSuccessful()){
-                token = response.body();
-                //Toast.makeText(getApplicationContext(), token, Toast.LENGTH_SHORT)
-               //         .show();
-                //Следующий объект retrofit
-                Retrofit voicesRetrofit = new Retrofit.Builder()
+                token = "Bearer " + response.body();
+                Toast.makeText(getApplicationContext(), token, Toast.LENGTH_SHORT)
+                        .show();
+                //Следующий объект retrofit для получения списка дикторов
+                Retrofit dictorsRetrofit = new Retrofit.Builder()
                         .baseUrl(AzureVoicesAPI.voiceURI)
                         .addConverterFactory(GsonConverterFactory.create())
                         .build();
-                AzureVoicesAPI azureVoicesAPI = voicesRetrofit.create(AzureVoicesAPI.class);
-
+                AzureVoicesAPI azureVoicesAPI = dictorsRetrofit.create(AzureVoicesAPI.class);
                 Call<ArrayList<Dictor>> callDictors = azureVoicesAPI.getDictorsList(token);
                 callDictors.enqueue(new DictorsCallback());
+
             }else {
-                Toast.makeText(getApplicationContext(), "Error!", Toast.LENGTH_SHORT)
-                        .show();
+                Toast.makeText(getApplicationContext(), Integer.toString(response.code()),
+                        Toast.LENGTH_SHORT).show();
             }
         }
 
         @Override
         public void onFailure(Call<String> call, Throwable t) {
-            Toast.makeText(getApplicationContext(), "Error", Toast.LENGTH_SHORT)
+            Toast.makeText(getApplicationContext(), t.getMessage(), Toast.LENGTH_SHORT)
                     .show();
         }
     }
 
-    private class DictorsCallback implements retrofit2.Callback<ArrayList<Dictor>> {
+
+    private class DictorsCallback implements Callback<ArrayList<Dictor>> {
         @Override
         public void onResponse(Call<ArrayList<Dictor>> call,
                                retrofit2.Response<ArrayList<Dictor>> response) {
-            ArrayList<Dictor> dictors = new ArrayList<>();
-            if(response.isSuccessful()) {
-                dictors = response.body();
-                Toast.makeText(getApplicationContext(), dictors.get(0).ShortName,
-                        Toast.LENGTH_SHORT).show();
+            if(response.isSuccessful()){
+                ArrayList<Dictor> dictors = response.body();
+                for (int i = 0; i < dictors.size(); i++) {
+                    //infoText.append(dictors.get(i).toString());
+                    if(dictors.get(i).ShortName.equals("ru-RU-DmitryNeural")){
+                        //Подготовить третий запрос на получение голоса
+                        Retrofit voiceRetrofit = new Retrofit.Builder()
+                                .baseUrl(AzureVoicesAPI.voiceURI)
+                                .addConverterFactory(SimpleXmlConverterFactory.create())
+                                .build();
+                        AzureVoicesAPI azureVoicesAPI = voiceRetrofit.create(AzureVoicesAPI.class);
+                        //подготовить объект
+                        VoiceChoice voiceChoice = new VoiceChoice();
+                        voiceChoice.lang = dictors.get(i).Locale;
+                        voiceChoice.voice = new Voice();
+                        voiceChoice.voice.lang = dictors.get(i).Locale;
+                        voiceChoice.voice.gender = dictors.get(i).Gender;
+                        voiceChoice.voice.name = dictors.get(i).ShortName;
+                        voiceChoice.voice.text = text;
+                        Call<ResponseBody> voiceCall = azureVoicesAPI.getVoice(token,
+                                voiceChoice);
+                        voiceCall.enqueue(new Callback<ResponseBody>() {
+                            @Override
+                            public void onResponse(Call<ResponseBody> call, retrofit2.Response<ResponseBody> response) {
+                                if(response.isSuccessful()){
+                                    InputStream inputStream = response.body().byteStream();
+                                    //TODO на основе примера (см. ссылку) скачать файл
+                                    //TODO проиграть файл в плейере
+                                }
+                            }
+
+                            @Override
+                            public void onFailure(Call<ResponseBody> call, Throwable t) {
+
+                            }
+                        });
+                    }
+                }
             }else {
-                Toast.makeText(getApplicationContext(),
-                        Integer.toString(response.code()),
+                Toast.makeText(getApplicationContext(), Integer.toString(response.code()),
                         Toast.LENGTH_SHORT).show();
             }
+
         }
 
         @Override
         public void onFailure(Call<ArrayList<Dictor>> call, Throwable t) {
-
+            Toast.makeText(getApplicationContext(), t.getMessage(),
+                    Toast.LENGTH_SHORT).show();
         }
     }
 }
